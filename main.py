@@ -2,6 +2,9 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import time
 import requests
+from datetime import datetime
+import os
+
 
 FAX_DIR = r"C:\Users\YourUsername\Documents\Fax"
 TOKEN_URL = "https://example.com/token"        # JWT 로그인 엔드포인트
@@ -36,27 +39,35 @@ class FaxHandler(FileSystemEventHandler):
             return None
 
     def on_created(self, event):
-        if not event.is_directory:
-            time.sleep(1)
-            if not self.token:
-                self.token = self.get_token()
-                if not self.token:
-                    return
+        if event.is_directory:
+            return
 
-            headers = {"Authorization": f"Bearer {self.token}"}
-            try:
-                res = requests.post(API_URL, json={"file_path": event.src_path}, headers=headers)
-                if res.status_code == 401:
-                    # 토큰 만료 시 재발급
-                    self.token = self.get_token()
-                    if self.token:
-                        headers = {"Authorization": f"Bearer {self.token}"}
-                        requests.post(API_URL, json={"file_path": event.src_path}, headers=headers)
-                elif res.status_code >= 400:
-                    raise Exception(f"API 에러: {res.status_code} - {res.text}")
-            except Exception as e:
-                with open("fax_error.log", "a", encoding="utf-8") as log:
-                    log.write(f"{time.ctime()} - API 호출 실패: {e}\n")
+        time.sleep(2)
+
+        if not self.token:
+            self.token = self.get_token()
+            if not self.token:
+                return
+
+        headers = {"Authorization": f"Bearer {self.token}"}
+
+        # 자동 날짜 생성
+        form_data = {
+            "group_id": "group1",
+            "withdrawn_at": datetime.now().strftime("%Y%m%d"),
+            "name": os.path.basename(event.src_path),
+            "company": "BAEKSUNG",
+            "type": "EXTRA",
+            "lock": "false"
+        }
+
+        try:
+            with open(event.src_path, "rb") as f:
+                files = [("file_datas", (os.path.basename(event.src_path), f))]
+                res = requests.post(API_URL, headers=headers, data=form_data, files=files)
+
+        except Exception as e:
+            self.log_error(f"파일 업로드 실패 - {event.src_path}", e)
 
 if __name__ == "__main__":
     observer = Observer()
